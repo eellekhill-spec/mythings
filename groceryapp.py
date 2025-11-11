@@ -1,884 +1,583 @@
-import React, { useState, useEffect } from 'react';
-import { DollarSign, Utensils, ShoppingCart, MapPin, Sparkles, Calendar, ChevronDown, ChevronUp, RefreshCw, Lock, Unlock, Clock, Printer, Download, Heart, RotateCcw, TrendingUp, AlertCircle, Check } from 'lucide-react';
+import streamlit as st
+import json
+import random
+from datetime import datetime
 
-const MealPlannerApp = () => {
-  const [budget, setBudget] = useState(150);
-  const [flexBudget, setFlexBudget] = useState(10);
-  const [dietTypes, setDietTypes] = useState(['balanced']);
-  const [zipCode, setZipCode] = useState('37201');
-  const [selectedStores, setSelectedStores] = useState(['Kroger']);
-  const [generatedPlan, setGeneratedPlan] = useState(null);
-  const [expandedDays, setExpandedDays] = useState({});
-  const [loading, setLoading] = useState(false);
-  const [includeSnacks, setIncludeSnacks] = useState(true);
-  const [portionSize, setPortionSize] = useState('couple');
-  const [favoriteMeals, setFavoriteMeals] = useState([]);
-  const [lockedMeals, setLockedMeals] = useState({});
-  const [mealHistory, setMealHistory] = useState([]);
-  const [nutritionTargets, setNutritionTargets] = useState({ calories: 2000, protein: 150, carbs: 225, fat: 65 });
-  const [showNutritionSettings, setShowNutritionSettings] = useState(false);
+# Page configuration
+st.set_page_config(
+    page_title="Smart Meal Planner Pro",
+    page_icon="🍽️",
+    layout="wide"
+)
 
-  const portionMultipliers = {
-    single: 1,
-    couple: 2,
-    family: 4
-  };
+# Initialize session state
+if 'generated_plan' not in st.session_state:
+    st.session_state.generated_plan = None
+if 'favorite_meals' not in st.session_state:
+    st.session_state.favorite_meals = []
+if 'locked_meals' not in st.session_state:
+    st.session_state.locked_meals = {}
+if 'meal_history' not in st.session_state:
+    st.session_state.meal_history = []
 
-  useEffect(() => {
-    loadFromStorage();
-  }, []);
+# Constants
+PORTION_MULTIPLIERS = {
+    'Single (1 person)': 1,
+    'Couple (2 people)': 2,
+    'Family (4 people)': 4
+}
 
-  const loadFromStorage = async () => {
-    try {
-      const savedFavorites = await window.storage.get('favorites');
-      if (savedFavorites) setFavoriteMeals(JSON.parse(savedFavorites.value));
-      
-      const savedHistory = await window.storage.get('meal-history');
-      if (savedHistory) setMealHistory(JSON.parse(savedHistory.value));
-      
-      const savedSettings = await window.storage.get('settings');
-      if (savedSettings) {
-        const settings = JSON.parse(savedSettings.value);
-        setBudget(settings.budget || 150);
-        setDietTypes(settings.dietTypes || ['balanced']);
-        setPortionSize(settings.portionSize || 'couple');
-        setNutritionTargets(settings.nutritionTargets || nutritionTargets);
-      }
-    } catch (error) {
-      console.log('No saved data found');
-    }
-  };
+AVAILABLE_DIETS = {
+    'balanced': {'name': 'Balanced', 'icon': '⚖️'},
+    'keto': {'name': 'Keto', 'icon': '🥑'},
+    'vegan': {'name': 'Vegan', 'icon': '🌱'},
+    'vegetarian': {'name': 'Vegetarian', 'icon': '🥗'},
+    'lowCarb': {'name': 'Low Carb', 'icon': '🍖'},
+    'paleo': {'name': 'Paleo', 'icon': '🦴'},
+    'mediterranean': {'name': 'Mediterranean', 'icon': '🫒'},
+    'dairyFree': {'name': 'Dairy Free', 'icon': '🥛'},
+    'nutFree': {'name': 'Nut Free', 'icon': '🚫'},
+    'glutenFree': {'name': 'Gluten Free', 'icon': '🌾'}
+}
 
-  const saveToStorage = async (key, value) => {
-    try {
-      await window.storage.set(key, JSON.stringify(value));
-    } catch (error) {
-      console.error('Storage error:', error);
-    }
-  };
+GROCERY_STORES = [
+    {'name': 'Kroger', 'priceLevel': 'moderate', 'distance': '1.2 miles'},
+    {'name': 'Walmart', 'priceLevel': 'budget', 'distance': '2.1 miles'},
+    {'name': 'Whole Foods', 'priceLevel': 'premium', 'distance': '1.8 miles'},
+    {'name': 'Trader Joes', 'priceLevel': 'moderate', 'distance': '3.4 miles'},
+    {'name': 'Publix', 'priceLevel': 'moderate', 'distance': '0.9 miles'},
+    {'name': 'Aldi', 'priceLevel': 'budget', 'distance': '2.7 miles'}
+]
 
-  const availableDiets = {
-    balanced: { name: 'Balanced', icon: '⚖️' },
-    keto: { name: 'Keto', icon: '🥑' },
-    vegan: { name: 'Vegan', icon: '🌱' },
-    vegetarian: { name: 'Vegetarian', icon: '🥗' },
-    lowCarb: { name: 'Low Carb', icon: '🍖' },
-    paleo: { name: 'Paleo', icon: '🦴' },
-    mediterranean: { name: 'Mediterranean', icon: '🫒' },
-    dairyFree: { name: 'Dairy Free', icon: '🥛' },
-    nutFree: { name: 'Nut Free', icon: '🚫' },
-    glutenFree: { name: 'Gluten Free', icon: '🌾' }
-  };
-
-  const groceryStores = [
-    { name: 'Kroger', priceLevel: 'moderate', distance: '1.2 miles' },
-    { name: 'Walmart', priceLevel: 'budget', distance: '2.1 miles' },
-    { name: 'Whole Foods', priceLevel: 'premium', distance: '1.8 miles' },
-    { name: 'Trader Joes', priceLevel: 'moderate', distance: '3.4 miles' },
-    { name: 'Publix', priceLevel: 'moderate', distance: '0.9 miles' },
-    { name: 'Aldi', priceLevel: 'budget', distance: '2.7 miles' }
-  ];
-
-  const mealDatabase = {
-    balanced: {
-      Breakfast: [
-        { name: 'Oatmeal with Berries', cost: { budget: 2.50, moderate: 3.50, premium: 4.50 }, cal: 350, protein: 12, carbs: 58, fat: 8, ingredients: [{ item: 'Oats', qty: '1 cup', section: 'Grains' }, { item: 'Berries', qty: '1 cup', section: 'Produce' }, { item: 'Honey', qty: '2 tbsp', section: 'Condiments' }], prepTime: 10, difficulty: 'easy', tags: ['quick', 'heart-healthy'], season: 'all' },
-        { name: 'Scrambled Eggs & Toast', cost: { budget: 2.00, moderate: 3.00, premium: 4.00 }, cal: 380, protein: 22, carbs: 35, fat: 16, ingredients: [{ item: 'Eggs', qty: '3 eggs', section: 'Dairy' }, { item: 'Bread', qty: '2 slices', section: 'Bakery' }, { item: 'Butter', qty: '1 tbsp', section: 'Dairy' }], prepTime: 8, difficulty: 'easy', tags: ['quick', 'protein-rich'], season: 'all' },
-        { name: 'Greek Yogurt Parfait', cost: { budget: 2.50, moderate: 3.50, premium: 4.50 }, cal: 320, protein: 20, carbs: 42, fat: 8, ingredients: [{ item: 'Yogurt', qty: '1 cup', section: 'Dairy' }, { item: 'Granola', qty: '0.5 cup', section: 'Grains' }], prepTime: 5, difficulty: 'easy', tags: ['no-cook'], season: 'all' },
-        { name: 'Banana Pancakes', cost: { budget: 2.00, moderate: 3.00, premium: 4.00 }, cal: 400, protein: 14, carbs: 62, fat: 10, ingredients: [{ item: 'Flour', qty: '1 cup', section: 'Baking' }, { item: 'Banana', qty: '2', section: 'Produce' }, { item: 'Eggs', qty: '2', section: 'Dairy' }], prepTime: 15, difficulty: 'easy', tags: ['weekend'], season: 'all' }
-      ],
-      Lunch: [
-        { name: 'Chicken Caesar Salad', cost: { budget: 4.50, moderate: 6.00, premium: 8.50 }, cal: 420, protein: 35, carbs: 25, fat: 18, ingredients: [{ item: 'Chicken', qty: '6 oz', section: 'Meat' }, { item: 'Lettuce', qty: '4 cups', section: 'Produce' }, { item: 'Parmesan', qty: '0.25 cup', section: 'Dairy' }], prepTime: 15, difficulty: 'easy', tags: ['protein-rich'], season: 'all' },
-        { name: 'Turkey Wrap', cost: { budget: 3.50, moderate: 5.50, premium: 7.00 }, cal: 450, protein: 28, carbs: 42, fat: 16, ingredients: [{ item: 'Turkey', qty: '4 oz', section: 'Deli' }, { item: 'Tortilla', qty: '1', section: 'Bakery' }, { item: 'Avocado', qty: '0.5', section: 'Produce' }], prepTime: 8, difficulty: 'easy', tags: ['quick'], season: 'all' },
-        { name: 'Quinoa Bowl', cost: { budget: 4.00, moderate: 5.50, premium: 7.50 }, cal: 480, protein: 22, carbs: 58, fat: 18, ingredients: [{ item: 'Quinoa', qty: '1 cup', section: 'Grains' }, { item: 'Chickpeas', qty: '0.5 cup', section: 'Canned' }, { item: 'Veggies', qty: '1.5 cups', section: 'Produce' }], prepTime: 20, difficulty: 'easy', tags: ['meal-prep'], season: 'all' }
-      ],
-      Dinner: [
-        { name: 'Baked Salmon', cost: { budget: 7.00, moderate: 9.00, premium: 12.00 }, cal: 580, protein: 42, carbs: 48, fat: 22, ingredients: [{ item: 'Salmon', qty: '6 oz', section: 'Seafood' }, { item: 'Quinoa', qty: '1 cup', section: 'Grains' }, { item: 'Broccoli', qty: '2 cups', section: 'Produce' }], prepTime: 30, difficulty: 'medium', tags: ['omega-3'], season: 'all' },
-        { name: 'Chicken Stir-Fry', cost: { budget: 5.00, moderate: 7.00, premium: 9.00 }, cal: 520, protein: 40, carbs: 52, fat: 16, ingredients: [{ item: 'Chicken', qty: '8 oz', section: 'Meat' }, { item: 'Veggies', qty: '3 cups', section: 'Frozen' }, { item: 'Rice', qty: '1 cup', section: 'Grains' }], prepTime: 20, difficulty: 'medium', tags: ['quick'], season: 'all' },
-        { name: 'Beef Pasta', cost: { budget: 5.50, moderate: 7.50, premium: 10.00 }, cal: 620, protein: 35, carbs: 72, fat: 20, ingredients: [{ item: 'Ground beef', qty: '8 oz', section: 'Meat' }, { item: 'Pasta', qty: '8 oz', section: 'Grains' }, { item: 'Sauce', qty: '2 cups', section: 'Canned' }], prepTime: 25, difficulty: 'easy', tags: ['comfort'], season: 'all' }
-      ],
-      Snack: [
-        { name: 'Apple & Peanut Butter', cost: { budget: 1.50, moderate: 2.00, premium: 2.50 }, cal: 200, protein: 8, carbs: 24, fat: 8, ingredients: [{ item: 'Apple', qty: '1', section: 'Produce' }, { item: 'Peanut butter', qty: '2 tbsp', section: 'Condiments' }], prepTime: 2, difficulty: 'easy', tags: ['no-cook'], season: 'all' },
-        { name: 'Yogurt & Granola', cost: { budget: 1.50, moderate: 2.50, premium: 3.50 }, cal: 280, protein: 18, carbs: 32, fat: 8, ingredients: [{ item: 'Yogurt', qty: '1 cup', section: 'Dairy' }, { item: 'Granola', qty: '0.25 cup', section: 'Grains' }], prepTime: 2, difficulty: 'easy', tags: ['protein-rich'], season: 'all' }
-      ]
+# Meal Database
+MEAL_DATABASE = {
+    'balanced': {
+        'Breakfast': [
+            {'name': 'Oatmeal with Berries', 'cost': {'budget': 2.50, 'moderate': 3.50, 'premium': 4.50}, 'cal': 350, 'protein': 12, 'carbs': 58, 'fat': 8, 'ingredients': [{'item': 'Oats', 'qty': '1 cup', 'section': 'Grains'}, {'item': 'Berries', 'qty': '1 cup', 'section': 'Produce'}, {'item': 'Honey', 'qty': '2 tbsp', 'section': 'Condiments'}], 'prepTime': 10, 'difficulty': 'easy', 'tags': ['quick', 'heart-healthy']},
+            {'name': 'Scrambled Eggs & Toast', 'cost': {'budget': 2.00, 'moderate': 3.00, 'premium': 4.00}, 'cal': 380, 'protein': 22, 'carbs': 35, 'fat': 16, 'ingredients': [{'item': 'Eggs', 'qty': '3 eggs', 'section': 'Dairy'}, {'item': 'Bread', 'qty': '2 slices', 'section': 'Bakery'}, {'item': 'Butter', 'qty': '1 tbsp', 'section': 'Dairy'}], 'prepTime': 8, 'difficulty': 'easy', 'tags': ['quick', 'protein-rich']},
+            {'name': 'Greek Yogurt Parfait', 'cost': {'budget': 2.50, 'moderate': 3.50, 'premium': 4.50}, 'cal': 320, 'protein': 20, 'carbs': 42, 'fat': 8, 'ingredients': [{'item': 'Yogurt', 'qty': '1 cup', 'section': 'Dairy'}, {'item': 'Granola', 'qty': '0.5 cup', 'section': 'Grains'}], 'prepTime': 5, 'difficulty': 'easy', 'tags': ['no-cook']},
+            {'name': 'Banana Pancakes', 'cost': {'budget': 2.00, 'moderate': 3.00, 'premium': 4.00}, 'cal': 400, 'protein': 14, 'carbs': 62, 'fat': 10, 'ingredients': [{'item': 'Flour', 'qty': '1 cup', 'section': 'Baking'}, {'item': 'Banana', 'qty': '2', 'section': 'Produce'}, {'item': 'Eggs', 'qty': '2', 'section': 'Dairy'}], 'prepTime': 15, 'difficulty': 'easy', 'tags': ['weekend']},
+        ],
+        'Lunch': [
+            {'name': 'Chicken Caesar Salad', 'cost': {'budget': 4.50, 'moderate': 6.00, 'premium': 8.50}, 'cal': 420, 'protein': 35, 'carbs': 25, 'fat': 18, 'ingredients': [{'item': 'Chicken', 'qty': '6 oz', 'section': 'Meat'}, {'item': 'Lettuce', 'qty': '4 cups', 'section': 'Produce'}, {'item': 'Parmesan', 'qty': '0.25 cup', 'section': 'Dairy'}], 'prepTime': 15, 'difficulty': 'easy', 'tags': ['protein-rich']},
+            {'name': 'Turkey Wrap', 'cost': {'budget': 3.50, 'moderate': 5.50, 'premium': 7.00}, 'cal': 450, 'protein': 28, 'carbs': 42, 'fat': 16, 'ingredients': [{'item': 'Turkey', 'qty': '4 oz', 'section': 'Deli'}, {'item': 'Tortilla', 'qty': '1', 'section': 'Bakery'}, {'item': 'Avocado', 'qty': '0.5', 'section': 'Produce'}], 'prepTime': 8, 'difficulty': 'easy', 'tags': ['quick']},
+            {'name': 'Quinoa Bowl', 'cost': {'budget': 4.00, 'moderate': 5.50, 'premium': 7.50}, 'cal': 480, 'protein': 22, 'carbs': 58, 'fat': 18, 'ingredients': [{'item': 'Quinoa', 'qty': '1 cup', 'section': 'Grains'}, {'item': 'Chickpeas', 'qty': '0.5 cup', 'section': 'Canned'}, {'item': 'Veggies', 'qty': '1.5 cups', 'section': 'Produce'}], 'prepTime': 20, 'difficulty': 'easy', 'tags': ['meal-prep']},
+            {'name': 'Chicken Rice Bowl', 'cost': {'budget': 3.50, 'moderate': 5.00, 'premium': 6.50}, 'cal': 520, 'protein': 38, 'carbs': 55, 'fat': 14, 'ingredients': [{'item': 'Chicken', 'qty': '6 oz', 'section': 'Meat'}, {'item': 'Rice', 'qty': '1 cup', 'section': 'Grains'}, {'item': 'Broccoli', 'qty': '1.5 cups', 'section': 'Produce'}], 'prepTime': 25, 'difficulty': 'easy', 'tags': ['filling']},
+        ],
+        'Dinner': [
+            {'name': 'Baked Salmon', 'cost': {'budget': 7.00, 'moderate': 9.00, 'premium': 12.00}, 'cal': 580, 'protein': 42, 'carbs': 48, 'fat': 22, 'ingredients': [{'item': 'Salmon', 'qty': '6 oz', 'section': 'Seafood'}, {'item': 'Quinoa', 'qty': '1 cup', 'section': 'Grains'}, {'item': 'Broccoli', 'qty': '2 cups', 'section': 'Produce'}], 'prepTime': 30, 'difficulty': 'medium', 'tags': ['omega-3']},
+            {'name': 'Chicken Stir-Fry', 'cost': {'budget': 5.00, 'moderate': 7.00, 'premium': 9.00}, 'cal': 520, 'protein': 40, 'carbs': 52, 'fat': 16, 'ingredients': [{'item': 'Chicken', 'qty': '8 oz', 'section': 'Meat'}, {'item': 'Veggies', 'qty': '3 cups', 'section': 'Frozen'}, {'item': 'Rice', 'qty': '1 cup', 'section': 'Grains'}], 'prepTime': 20, 'difficulty': 'medium', 'tags': ['quick']},
+            {'name': 'Beef Pasta', 'cost': {'budget': 5.50, 'moderate': 7.50, 'premium': 10.00}, 'cal': 620, 'protein': 35, 'carbs': 72, 'fat': 20, 'ingredients': [{'item': 'Ground beef', 'qty': '8 oz', 'section': 'Meat'}, {'item': 'Pasta', 'qty': '8 oz', 'section': 'Grains'}, {'item': 'Sauce', 'qty': '2 cups', 'section': 'Canned'}], 'prepTime': 25, 'difficulty': 'easy', 'tags': ['comfort']},
+            {'name': 'Roasted Chicken & Potatoes', 'cost': {'budget': 6.00, 'moderate': 8.00, 'premium': 10.50}, 'cal': 560, 'protein': 45, 'carbs': 48, 'fat': 18, 'ingredients': [{'item': 'Chicken thighs', 'qty': '12 oz', 'section': 'Meat'}, {'item': 'Potatoes', 'qty': '3 medium', 'section': 'Produce'}, {'item': 'Green beans', 'qty': '2 cups', 'section': 'Produce'}], 'prepTime': 45, 'difficulty': 'medium', 'tags': ['comfort']},
+        ],
+        'Snack': [
+            {'name': 'Apple & Peanut Butter', 'cost': {'budget': 1.50, 'moderate': 2.00, 'premium': 2.50}, 'cal': 200, 'protein': 8, 'carbs': 24, 'fat': 8, 'ingredients': [{'item': 'Apple', 'qty': '1', 'section': 'Produce'}, {'item': 'Peanut butter', 'qty': '2 tbsp', 'section': 'Condiments'}], 'prepTime': 2, 'difficulty': 'easy', 'tags': ['no-cook']},
+            {'name': 'Yogurt & Granola', 'cost': {'budget': 1.50, 'moderate': 2.50, 'premium': 3.50}, 'cal': 280, 'protein': 18, 'carbs': 32, 'fat': 8, 'ingredients': [{'item': 'Yogurt', 'qty': '1 cup', 'section': 'Dairy'}, {'item': 'Granola', 'qty': '0.25 cup', 'section': 'Grains'}], 'prepTime': 2, 'difficulty': 'easy', 'tags': ['protein-rich']},
+            {'name': 'Trail Mix', 'cost': {'budget': 2.00, 'moderate': 3.00, 'premium': 4.00}, 'cal': 260, 'protein': 8, 'carbs': 28, 'fat': 14, 'ingredients': [{'item': 'Mixed nuts', 'qty': '0.5 cup', 'section': 'Snacks'}, {'item': 'Dried fruit', 'qty': '0.25 cup', 'section': 'Snacks'}], 'prepTime': 0, 'difficulty': 'easy', 'tags': ['portable']},
+        ]
     },
-    keto: {
-      Breakfast: [
-        { name: 'Bacon & Eggs', cost: { budget: 3.00, moderate: 4.00, premium: 5.50 }, cal: 420, protein: 28, carbs: 4, fat: 32, ingredients: [{ item: 'Bacon', qty: '4 strips', section: 'Meat' }, { item: 'Eggs', qty: '3', section: 'Dairy' }, { item: 'Avocado', qty: '0.5', section: 'Produce' }], prepTime: 12, difficulty: 'easy', tags: ['high-fat'], season: 'all' }
-      ],
-      Lunch: [
-        { name: 'Keto Cobb Salad', cost: { budget: 5.50, moderate: 7.50, premium: 10.00 }, cal: 520, protein: 32, carbs: 8, fat: 38, ingredients: [{ item: 'Chicken', qty: '6 oz', section: 'Meat' }, { item: 'Bacon', qty: '3 strips', section: 'Meat' }, { item: 'Eggs', qty: '2', section: 'Dairy' }, { item: 'Cheese', qty: '2 oz', section: 'Dairy' }], prepTime: 18, difficulty: 'easy', tags: ['protein-rich'], season: 'all' }
-      ],
-      Dinner: [
-        { name: 'Ribeye Steak', cost: { budget: 9.00, moderate: 12.00, premium: 16.00 }, cal: 680, protein: 48, carbs: 6, fat: 52, ingredients: [{ item: 'Steak', qty: '10 oz', section: 'Meat' }, { item: 'Asparagus', qty: '8 spears', section: 'Produce' }, { item: 'Butter', qty: '2 tbsp', section: 'Dairy' }], prepTime: 20, difficulty: 'medium', tags: ['special'], season: 'all' }
-      ],
-      Snack: [
-        { name: 'Cheese & Pepperoni', cost: { budget: 2.00, moderate: 3.00, premium: 4.00 }, cal: 250, protein: 16, carbs: 2, fat: 20, ingredients: [{ item: 'Cheese', qty: '2 oz', section: 'Dairy' }, { item: 'Pepperoni', qty: '1 oz', section: 'Deli' }], prepTime: 0, difficulty: 'easy', tags: ['no-cook'], season: 'all' }
-      ]
+    'keto': {
+        'Breakfast': [
+            {'name': 'Bacon & Eggs', 'cost': {'budget': 3.00, 'moderate': 4.00, 'premium': 5.50}, 'cal': 420, 'protein': 28, 'carbs': 4, 'fat': 32, 'ingredients': [{'item': 'Bacon', 'qty': '4 strips', 'section': 'Meat'}, {'item': 'Eggs', 'qty': '3', 'section': 'Dairy'}, {'item': 'Avocado', 'qty': '0.5', 'section': 'Produce'}], 'prepTime': 12, 'difficulty': 'easy', 'tags': ['high-fat']},
+            {'name': 'Cheese Omelet', 'cost': {'budget': 2.50, 'moderate': 3.50, 'premium': 4.50}, 'cal': 450, 'protein': 26, 'carbs': 3, 'fat': 36, 'ingredients': [{'item': 'Eggs', 'qty': '3', 'section': 'Dairy'}, {'item': 'Cheese', 'qty': '2 oz', 'section': 'Dairy'}], 'prepTime': 10, 'difficulty': 'easy', 'tags': ['quick']},
+        ],
+        'Lunch': [
+            {'name': 'Keto Cobb Salad', 'cost': {'budget': 5.50, 'moderate': 7.50, 'premium': 10.00}, 'cal': 520, 'protein': 32, 'carbs': 8, 'fat': 38, 'ingredients': [{'item': 'Chicken', 'qty': '6 oz', 'section': 'Meat'}, {'item': 'Bacon', 'qty': '3 strips', 'section': 'Meat'}, {'item': 'Eggs', 'qty': '2', 'section': 'Dairy'}], 'prepTime': 18, 'difficulty': 'easy', 'tags': ['protein-rich']},
+            {'name': 'Bunless Burger', 'cost': {'budget': 5.00, 'moderate': 7.00, 'premium': 9.00}, 'cal': 480, 'protein': 36, 'carbs': 6, 'fat': 34, 'ingredients': [{'item': 'Beef patty', 'qty': '8 oz', 'section': 'Meat'}, {'item': 'Cheese', 'qty': '2 oz', 'section': 'Dairy'}, {'item': 'Lettuce', 'qty': '2 leaves', 'section': 'Produce'}], 'prepTime': 15, 'difficulty': 'easy', 'tags': ['satisfying']},
+        ],
+        'Dinner': [
+            {'name': 'Ribeye Steak', 'cost': {'budget': 9.00, 'moderate': 12.00, 'premium': 16.00}, 'cal': 680, 'protein': 48, 'carbs': 6, 'fat': 52, 'ingredients': [{'item': 'Steak', 'qty': '10 oz', 'section': 'Meat'}, {'item': 'Asparagus', 'qty': '8 spears', 'section': 'Produce'}, {'item': 'Butter', 'qty': '2 tbsp', 'section': 'Dairy'}], 'prepTime': 20, 'difficulty': 'medium', 'tags': ['special']},
+            {'name': 'Keto Chicken Alfredo', 'cost': {'budget': 6.00, 'moderate': 8.00, 'premium': 10.50}, 'cal': 620, 'protein': 45, 'carbs': 8, 'fat': 46, 'ingredients': [{'item': 'Chicken', 'qty': '8 oz', 'section': 'Meat'}, {'item': 'Zucchini noodles', 'qty': '2 cups', 'section': 'Produce'}, {'item': 'Cream', 'qty': '0.5 cup', 'section': 'Dairy'}], 'prepTime': 25, 'difficulty': 'medium', 'tags': ['comfort']},
+        ],
+        'Snack': [
+            {'name': 'Cheese & Pepperoni', 'cost': {'budget': 2.00, 'moderate': 3.00, 'premium': 4.00}, 'cal': 250, 'protein': 16, 'carbs': 2, 'fat': 20, 'ingredients': [{'item': 'Cheese', 'qty': '2 oz', 'section': 'Dairy'}, {'item': 'Pepperoni', 'qty': '1 oz', 'section': 'Deli'}], 'prepTime': 0, 'difficulty': 'easy', 'tags': ['no-cook']},
+            {'name': 'Macadamia Nuts', 'cost': {'budget': 3.00, 'moderate': 4.00, 'premium': 5.00}, 'cal': 240, 'protein': 3, 'carbs': 4, 'fat': 24, 'ingredients': [{'item': 'Macadamia nuts', 'qty': '1 oz', 'section': 'Snacks'}], 'prepTime': 0, 'difficulty': 'easy', 'tags': ['high-fat']},
+        ]
     },
-    vegan: {
-      Breakfast: [
-        { name: 'Smoothie Bowl', cost: { budget: 3.50, moderate: 4.50, premium: 6.00 }, cal: 320, protein: 12, carbs: 52, fat: 8, ingredients: [{ item: 'Banana', qty: '1', section: 'Produce' }, { item: 'Berries', qty: '1 cup', section: 'Produce' }, { item: 'Oat milk', qty: '1 cup', section: 'Dairy' }], prepTime: 8, difficulty: 'easy', tags: ['refreshing'], season: 'all' }
-      ],
-      Lunch: [
-        { name: 'Buddha Bowl', cost: { budget: 4.50, moderate: 6.50, premium: 9.00 }, cal: 480, protein: 18, carbs: 68, fat: 14, ingredients: [{ item: 'Quinoa', qty: '1 cup', section: 'Grains' }, { item: 'Chickpeas', qty: '0.75 cup', section: 'Canned' }, { item: 'Sweet potato', qty: '1', section: 'Produce' }, { item: 'Kale', qty: '2 cups', section: 'Produce' }], prepTime: 30, difficulty: 'medium', tags: ['nutrient-dense'], season: 'all' }
-      ],
-      Dinner: [
-        { name: 'Lentil Curry', cost: { budget: 3.50, moderate: 5.00, premium: 7.00 }, cal: 420, protein: 22, carbs: 58, fat: 10, ingredients: [{ item: 'Lentils', qty: '1 cup', section: 'Grains' }, { item: 'Coconut milk', qty: '1 cup', section: 'Canned' }, { item: 'Spices', qty: '2 tbsp', section: 'Spices' }, { item: 'Rice', qty: '1 cup', section: 'Grains' }], prepTime: 35, difficulty: 'easy', tags: ['comfort'], season: 'all' }
-      ],
-      Snack: [
-        { name: 'Hummus & Veggies', cost: { budget: 2.00, moderate: 3.00, premium: 4.50 }, cal: 180, protein: 8, carbs: 22, fat: 7, ingredients: [{ item: 'Hummus', qty: '0.5 cup', section: 'Deli' }, { item: 'Carrots', qty: '1 cup', section: 'Produce' }], prepTime: 3, difficulty: 'easy', tags: ['healthy'], season: 'all' }
-      ]
+    'vegan': {
+        'Breakfast': [
+            {'name': 'Smoothie Bowl', 'cost': {'budget': 3.50, 'moderate': 4.50, 'premium': 6.00}, 'cal': 320, 'protein': 12, 'carbs': 52, 'fat': 8, 'ingredients': [{'item': 'Banana', 'qty': '1', 'section': 'Produce'}, {'item': 'Berries', 'qty': '1 cup', 'section': 'Produce'}, {'item': 'Oat milk', 'qty': '1 cup', 'section': 'Dairy'}], 'prepTime': 8, 'difficulty': 'easy', 'tags': ['refreshing']},
+            {'name': 'Avocado Toast', 'cost': {'budget': 2.50, 'moderate': 3.50, 'premium': 5.00}, 'cal': 340, 'protein': 10, 'carbs': 42, 'fat': 16, 'ingredients': [{'item': 'Bread', 'qty': '2 slices', 'section': 'Bakery'}, {'item': 'Avocado', 'qty': '1', 'section': 'Produce'}], 'prepTime': 5, 'difficulty': 'easy', 'tags': ['quick']},
+        ],
+        'Lunch': [
+            {'name': 'Buddha Bowl', 'cost': {'budget': 4.50, 'moderate': 6.50, 'premium': 9.00}, 'cal': 480, 'protein': 18, 'carbs': 68, 'fat': 14, 'ingredients': [{'item': 'Quinoa', 'qty': '1 cup', 'section': 'Grains'}, {'item': 'Chickpeas', 'qty': '0.75 cup', 'section': 'Canned'}, {'item': 'Sweet potato', 'qty': '1', 'section': 'Produce'}], 'prepTime': 30, 'difficulty': 'medium', 'tags': ['nutrient-dense']},
+            {'name': 'Vegan Burrito Bowl', 'cost': {'budget': 3.50, 'moderate': 5.00, 'premium': 7.00}, 'cal': 520, 'protein': 22, 'carbs': 75, 'fat': 14, 'ingredients': [{'item': 'Rice', 'qty': '1 cup', 'section': 'Grains'}, {'item': 'Black beans', 'qty': '1 cup', 'section': 'Canned'}, {'item': 'Salsa', 'qty': '0.25 cup', 'section': 'Condiments'}], 'prepTime': 20, 'difficulty': 'easy', 'tags': ['filling']},
+        ],
+        'Dinner': [
+            {'name': 'Lentil Curry', 'cost': {'budget': 3.50, 'moderate': 5.00, 'premium': 7.00}, 'cal': 420, 'protein': 22, 'carbs': 58, 'fat': 10, 'ingredients': [{'item': 'Lentils', 'qty': '1 cup', 'section': 'Grains'}, {'item': 'Coconut milk', 'qty': '1 cup', 'section': 'Canned'}, {'item': 'Rice', 'qty': '1 cup', 'section': 'Grains'}], 'prepTime': 35, 'difficulty': 'easy', 'tags': ['comfort']},
+            {'name': 'Pasta Primavera', 'cost': {'budget': 4.00, 'moderate': 5.50, 'premium': 7.50}, 'cal': 480, 'protein': 18, 'carbs': 72, 'fat': 14, 'ingredients': [{'item': 'Pasta', 'qty': '8 oz', 'section': 'Grains'}, {'item': 'Veggies', 'qty': '3 cups', 'section': 'Produce'}, {'item': 'Olive oil', 'qty': '2 tbsp', 'section': 'Condiments'}], 'prepTime': 20, 'difficulty': 'easy', 'tags': ['colorful']},
+        ],
+        'Snack': [
+            {'name': 'Hummus & Veggies', 'cost': {'budget': 2.00, 'moderate': 3.00, 'premium': 4.50}, 'cal': 180, 'protein': 8, 'carbs': 22, 'fat': 7, 'ingredients': [{'item': 'Hummus', 'qty': '0.5 cup', 'section': 'Deli'}, {'item': 'Carrots', 'qty': '1 cup', 'section': 'Produce'}], 'prepTime': 3, 'difficulty': 'easy', 'tags': ['healthy']},
+            {'name': 'Energy Balls', 'cost': {'budget': 2.50, 'moderate': 3.50, 'premium': 4.50}, 'cal': 220, 'protein': 6, 'carbs': 28, 'fat': 10, 'ingredients': [{'item': 'Dates', 'qty': '0.5 cup', 'section': 'Snacks'}, {'item': 'Oats', 'qty': '0.5 cup', 'section': 'Grains'}], 'prepTime': 10, 'difficulty': 'easy', 'tags': ['sweet']},
+        ]
     }
-  };
+}
 
-  const generateMealPlan = () => {
-    setLoading(true);
-    setTimeout(() => {
-      const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-      const plan = [];
-      
-      const priceLevel = selectedStores.some(s => groceryStores.find(g => g.name === s)?.priceLevel === 'budget') ? 'budget' :
-                         selectedStores.some(s => groceryStores.find(g => g.name === s)?.priceLevel === 'premium') ? 'premium' : 'moderate';
-      
-      const totalBudget = budget + flexBudget;
-      const dailyBudget = totalBudget / 7;
-      const requiredMealTypes = ['Breakfast', 'Lunch', 'Dinner'];
-      const mealTypesNeeded = includeSnacks ? [...requiredMealTypes, 'Snack'] : requiredMealTypes;
-      
-      const usedMeals = {};
-      const portionMultiplier = portionMultipliers[portionSize];
-      
-      days.forEach((day, dayIndex) => {
-        const dayMeals = [];
-        let dayTotal = 0;
-        usedMeals[day] = [];
+def generate_meal_plan(budget, flex_budget, diet_types, selected_stores, include_snacks, portion_size):
+    """Generate a weekly meal plan"""
+    days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    plan = []
+    
+    # Determine price level
+    price_levels = [store['priceLevel'] for store in GROCERY_STORES if store['name'] in selected_stores]
+    if 'budget' in price_levels:
+        price_level = 'budget'
+    elif 'premium' in price_levels:
+        price_level = 'premium'
+    else:
+        price_level = 'moderate'
+    
+    total_budget = budget + flex_budget
+    daily_budget = total_budget / 7
+    
+    meal_types = ['Breakfast', 'Lunch', 'Dinner']
+    if include_snacks:
+        meal_types.append('Snack')
+    
+    portion_multiplier = PORTION_MULTIPLIERS[portion_size]
+    used_meals = {}
+    
+    for day_index, day in enumerate(days):
+        day_meals = []
+        day_total = 0
+        used_meals[day] = []
         
-        mealTypesNeeded.forEach(mealType => {
-          const lockedKey = `${day}-${mealType}`;
-          
-          if (lockedMeals[lockedKey]) {
-            const meal = lockedMeals[lockedKey];
-            dayMeals.push(meal);
-            usedMeals[day].push(meal);
-            dayTotal += meal.actualCost;
-            return;
-          }
-          
-          const activeDiet = dietTypes[Math.floor(Math.random() * dietTypes.length)];
-          const availableMeals = mealDatabase[activeDiet]?.[mealType] || [];
-          
-          if (availableMeals.length > 0) {
-            let selectedMeal;
-            let attempts = 0;
-            const maxAttempts = 20;
+        for meal_type in meal_types:
+            # Check if meal is locked
+            locked_key = f"{day}-{meal_type}"
+            if locked_key in st.session_state.locked_meals:
+                meal = st.session_state.locked_meals[locked_key]
+                day_meals.append(meal)
+                used_meals[day].append(meal)
+                day_total += meal['actualCost']
+                continue
             
-            const recentMeals = mealHistory.slice(-14).map(m => m.name);
+            # Select diet
+            active_diet = random.choice(diet_types)
+            available_meals = MEAL_DATABASE.get(active_diet, {}).get(meal_type, [])
             
-            do {
-              selectedMeal = availableMeals[Math.floor(Math.random() * availableMeals.length)];
-              attempts++;
-              
-              if (dayIndex % 2 === 1 && dayIndex > 0) {
-                const previousDay = days[dayIndex - 1];
-                const previousDayMealNames = usedMeals[previousDay]
-                  ?.filter(m => m.type === mealType)
-                  .map(m => m.name) || [];
+            if available_meals:
+                attempts = 0
+                max_attempts = 20
+                recent_meals = [m['name'] for m in st.session_state.meal_history[-14:]]
                 
-                if (previousDayMealNames.includes(selectedMeal.name)) {
-                  continue;
-                }
-              }
-              
-              if (recentMeals.includes(selectedMeal.name) && attempts < maxAttempts) {
-                continue;
-              }
-              
-              break;
-            } while (attempts < maxAttempts);
-            
-            const baseCost = selectedMeal.cost[priceLevel];
-            const mealCost = baseCost * portionMultiplier;
-            
-            if (dayTotal + mealCost <= dailyBudget * 1.2) {
-              const mealWithDetails = {
-                ...selectedMeal,
-                type: mealType,
-                actualCost: mealCost,
-                baseCost: baseCost,
-                diet: activeDiet,
-                store: selectedStores[Math.floor(Math.random() * selectedStores.length)],
-                portions: portionMultiplier
-              };
-              
-              dayMeals.push(mealWithDetails);
-              usedMeals[day].push(mealWithDetails);
-              dayTotal += mealCost;
-            }
-          }
-        });
+                while attempts < max_attempts:
+                    selected_meal = random.choice(available_meals)
+                    attempts += 1
+                    
+                    # Check for variety every other day
+                    if day_index % 2 == 1 and day_index > 0:
+                        previous_day = days[day_index - 1]
+                        previous_meals = [m['name'] for m in used_meals.get(previous_day, []) if m['type'] == meal_type]
+                        if selected_meal['name'] in previous_meals:
+                            continue
+                    
+                    # Check history
+                    if selected_meal['name'] in recent_meals and attempts < max_attempts:
+                        continue
+                    
+                    break
+                
+                base_cost = selected_meal['cost'][price_level]
+                meal_cost = base_cost * portion_multiplier
+                
+                if day_total + meal_cost <= daily_budget * 1.2:
+                    meal_with_details = {
+                        **selected_meal,
+                        'type': meal_type,
+                        'actualCost': meal_cost,
+                        'baseCost': base_cost,
+                        'diet': active_diet,
+                        'store': random.choice(selected_stores),
+                        'portions': portion_multiplier
+                    }
+                    
+                    day_meals.append(meal_with_details)
+                    used_meals[day].append(meal_with_details)
+                    day_total += meal_cost
         
-        plan.push({ day, meals: dayMeals, total: dayTotal });
-      });
-      
-      setGeneratedPlan(plan);
-      
-      const newHistory = [...mealHistory, ...plan.flatMap(d => d.meals)].slice(-50);
-      setMealHistory(newHistory);
-      saveToStorage('meal-history', newHistory);
-      
-      setLoading(false);
-    }, 1500);
-  };
-
-  const regenerateDay = (dayName) => {
-    if (!generatedPlan) return;
+        plan.append({'day': day, 'meals': day_meals, 'total': day_total})
     
-    const updatedPlan = generatedPlan.map(dayPlan => {
-      if (dayPlan.day !== dayName) return dayPlan;
-      
-      const priceLevel = selectedStores.some(s => groceryStores.find(g => g.name === s)?.priceLevel === 'budget') ? 'budget' :
-                         selectedStores.some(s => groceryStores.find(g => g.name === s)?.priceLevel === 'premium') ? 'premium' : 'moderate';
-      
-      const mealTypesNeeded = includeSnacks ? ['Breakfast', 'Lunch', 'Dinner', 'Snack'] : ['Breakfast', 'Lunch', 'Dinner'];
-      const newMeals = [];
-      let dayTotal = 0;
-      
-      mealTypesNeeded.forEach(mealType => {
-        const lockedKey = `${dayName}-${mealType}`;
-        if (lockedMeals[lockedKey]) {
-          const meal = lockedMeals[lockedKey];
-          newMeals.push(meal);
-          dayTotal += meal.actualCost;
-          return;
-        }
+    # Update history
+    all_meals = [meal for day in plan for meal in day['meals']]
+    st.session_state.meal_history.extend(all_meals)
+    st.session_state.meal_history = st.session_state.meal_history[-50:]  # Keep last 50
+    
+    return plan
+
+def calculate_nutrition(plan):
+    """Calculate weekly and daily nutrition"""
+    weekly = {'calories': 0, 'protein': 0, 'carbs': 0, 'fat': 0}
+    
+    for day in plan:
+        for meal in day['meals']:
+            weekly['calories'] += meal['cal']
+            weekly['protein'] += meal['protein']
+            weekly['carbs'] += meal['carbs']
+            weekly['fat'] += meal['fat']
+    
+    daily = {k: round(v / 7) for k, v in weekly.items()}
+    return weekly, daily
+
+def get_shopping_list(plan):
+    """Generate organized shopping list"""
+    all_ingredients = []
+    for day in plan:
+        for meal in day['meals']:
+            all_ingredients.extend(meal['ingredients'])
+    
+    # Group by section
+    by_section = {}
+    for ing in all_ingredients:
+        section = ing['section']
+        if section not in by_section:
+            by_section[section] = []
         
-        const activeDiet = dietTypes[Math.floor(Math.random() * dietTypes.length)];
-        const availableMeals = mealDatabase[activeDiet]?.[mealType] || [];
+        # Check if item already exists
+        existing = next((i for i in by_section[section] if i['item'] == ing['item']), None)
+        if existing:
+            existing['qty'] = f"{existing['qty']} + {ing['qty']}"
+        else:
+            by_section[section].append(ing.copy())
+    
+    return by_section
+
+# Main App
+st.title("🍽️ Smart Meal Planner Pro")
+st.markdown("AI-powered meal planning with nutritional tracking, budget optimization, and smart variety")
+
+# Sidebar - Settings
+with st.sidebar:
+    st.header("⚙️ Settings")
+    
+    # Budget
+    st.subheader("💰 Budget")
+    budget = st.number_input("Weekly Budget ($)", min_value=0, value=150, step=10)
+    flex_budget = st.number_input("Flex Budget ($)", min_value=0, value=10, step=5,
+                                   help="Allows going slightly over for better value")
+    
+    st.markdown(f"**Total:** ${budget + flex_budget}")
+    st.markdown(f"**Daily:** ${(budget + flex_budget) / 7:.2f}")
+    st.markdown(f"**Per Meal:** ${(budget + flex_budget) / 28:.2f}")
+    
+    st.divider()
+    
+    # Portions
+    st.subheader("👥 Portions")
+    portion_size = st.selectbox("Portion Size", list(PORTION_MULTIPLIERS.keys()))
+    include_snacks = st.checkbox("Include daily snacks", value=True,
+                                  help="Breakfast, Lunch, Dinner always included")
+    
+    st.divider()
+    
+    # Diet Selection
+    st.subheader("🥗 Diet Preferences")
+    selected_diets = []
+    cols = st.columns(2)
+    for idx, (key, diet) in enumerate(AVAILABLE_DIETS.items()):
+        col = cols[idx % 2]
+        if col.checkbox(f"{diet['icon']} {diet['name']}", value=(key == 'balanced'), key=f"diet_{key}"):
+            selected_diets.append(key)
+    
+    if not selected_diets:
+        st.warning("Please select at least one diet type")
+        selected_diets = ['balanced']
+    
+    st.divider()
+    
+    # Store Selection
+    st.subheader("🏪 Grocery Stores")
+    selected_stores = []
+    for store in GROCERY_STORES:
+        if st.checkbox(f"{store['name']} ({store['distance']})", 
+                      value=(store['name'] == 'Kroger'),
+                      key=f"store_{store['name']}"):
+            selected_stores.append(store['name'])
+    
+    if not selected_stores:
+        st.warning("Please select at least one store")
+        selected_stores = ['Kroger']
+    
+    st.divider()
+    
+    # Nutrition Targets
+    st.subheader("🎯 Daily Nutrition Targets")
+    if st.checkbox("Show Nutrition Settings"):
+        target_calories = st.number_input("Calories", min_value=1000, max_value=5000, value=2000, step=100)
+        target_protein = st.number_input("Protein (g)", min_value=50, max_value=300, value=150, step=10)
+        target_carbs = st.number_input("Carbs (g)", min_value=50, max_value=500, value=225, step=25)
+        target_fat = st.number_input("Fat (g)", min_value=30, max_value=200, value=65, step=5)
+    else:
+        target_calories, target_protein, target_carbs, target_fat = 2000, 150, 225, 65
+
+# Main Content
+col1, col2, col3 = st.columns([1, 2, 1])
+with col2:
+    if st.button("✨ Generate Meal Plan", type="primary", use_container_width=True):
+        with st.spinner("Generating your optimized meal plan..."):
+            plan = generate_meal_plan(budget, flex_budget, selected_diets, selected_stores, 
+                                     include_snacks, portion_size)
+            st.session_state.generated_plan = plan
+        st.success("Meal plan generated successfully!")
+
+if st.session_state.generated_plan:
+    plan = st.session_state.generated_plan
+    
+    # Calculate stats
+    total_cost = sum(day['total'] for day in plan)
+    total_meals = sum(len(day['meals']) for day in plan)
+    weekly_nutrition, daily_nutrition = calculate_nutrition(plan)
+    
+    # Stats Cards
+    st.markdown("### 📊 Weekly Overview")
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    with col1:
+        st.metric("Total Cost", f"${total_cost:.2f}")
+    with col2:
+        remaining = (budget + flex_budget) - total_cost
+        st.metric("Remaining", f"${remaining:.2f}", 
+                 delta=f"${remaining:.2f}" if remaining >= 0 else f"-${abs(remaining):.2f}")
+    with col3:
+        st.metric("Total Meals", total_meals)
+    with col4:
+        st.metric("Daily Calories", daily_nutrition['calories'])
+    with col5:
+        st.metric("Daily Protein", f"{daily_nutrition['protein']}g")
+    
+    # Action Buttons
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("🖨️ Print Meal Plan"):
+            st.info("Use your browser's print function (Ctrl+P / Cmd+P)")
+    with col2:
+        shopping_list = get_shopping_list(plan)
+        shopping_text = "SHOPPING LIST\n\n"
+        for section, items in sorted(shopping_list.items()):
+            shopping_text += f"{section.upper()}\n"
+            for item in items:
+                shopping_text += f"  ☐ {item['item']} - {item['qty']}\n"
+            shopping_text += "\n"
         
-        if (availableMeals.length > 0) {
-          const selectedMeal = availableMeals[Math.floor(Math.random() * availableMeals.length)];
-          const baseCost = selectedMeal.cost[priceLevel];
-          const mealCost = baseCost * portionMultipliers[portionSize];
-          
-          const mealWithDetails = {
-            ...selectedMeal,
-            type: mealType,
-            actualCost: mealCost,
-            baseCost: baseCost,
-            diet: activeDiet,
-            store: selectedStores[Math.floor(Math.random() * selectedStores.length)],
-            portions: portionMultipliers[portionSize]
-          };
-          
-          newMeals.push(mealWithDetails);
-          dayTotal += mealCost;
-        }
-      });
-      
-      return { day: dayName, meals: newMeals, total: dayTotal };
-    });
+        st.download_button(
+            label="📥 Download Shopping List",
+            data=shopping_text,
+            file_name="shopping_list.txt",
+            mime="text/plain"
+        )
+    with col3:
+        if st.button("🔄 Clear All Locks"):
+            st.session_state.locked_meals = {}
+            st.rerun()
     
-    setGeneratedPlan(updatedPlan);
-  };
-
-  const toggleLockMeal = (day, mealType, meal) => {
-    const key = `${day}-${mealType}`;
-    const newLocked = { ...lockedMeals };
+    st.divider()
     
-    if (newLocked[key]) {
-      delete newLocked[key];
-    } else {
-      newLocked[key] = meal;
-    }
+    # Weekly Meal Plan
+    st.markdown("### 📅 Your Weekly Meal Plan")
     
-    setLockedMeals(newLocked);
-  };
-
-  const toggleFavorite = (meal) => {
-    const mealKey = `${meal.name}-${meal.diet}`;
-    let newFavorites;
-    
-    if (favoriteMeals.some(f => `${f.name}-${f.diet}` === mealKey)) {
-      newFavorites = favoriteMeals.filter(f => `${f.name}-${f.diet}` !== mealKey);
-    } else {
-      newFavorites = [...favoriteMeals, meal];
-    }
-    
-    setFavoriteMeals(newFavorites);
-    saveToStorage('favorites', newFavorites);
-  };
-
-  const isFavorite = (meal) => {
-    return favoriteMeals.some(f => f.name === meal.name && f.diet === meal.diet);
-  };
-
-  const isLocked = (day, mealType) => {
-    return !!lockedMeals[`${day}-${mealType}`];
-  };
-
-  const toggleDiet = (diet) => {
-    let newDiets;
-    if (dietTypes.includes(diet)) {
-      if (dietTypes.length > 1) {
-        newDiets = dietTypes.filter(d => d !== diet);
-      } else {
-        return;
-      }
-    } else {
-      newDiets = [...dietTypes, diet];
-    }
-    setDietTypes(newDiets);
-    saveToStorage('settings', { budget, dietTypes: newDiets, portionSize, nutritionTargets });
-  };
-
-  const toggleStore = (store) => {
-    if (selectedStores.includes(store)) {
-      if (selectedStores.length > 1) {
-        setSelectedStores(selectedStores.filter(s => s !== store));
-      }
-    } else {
-      setSelectedStores([...selectedStores, store]);
-    }
-  };
-
-  const toggleDay = (day) => {
-    setExpandedDays({ ...expandedDays, [day]: !expandedDays[day] });
-  };
-
-  const totalCost = generatedPlan?.reduce((sum, day) => sum + day.total, 0) || 0;
-  const allIngredients = generatedPlan?.flatMap(day => 
-    day.meals.flatMap(meal => meal.ingredients)
-  ) || [];
-  
-  const groupedIngredients = allIngredients.reduce((acc, ing) => {
-    const existing = acc.find(i => i.item === ing.item);
-    if (existing) {
-      existing.qty = `${existing.qty} + ${ing.qty}`;
-    } else {
-      acc.push({ ...ing });
-    }
-    return acc;
-  }, []);
-
-  const ingredientsBySection = groupedIngredients.reduce((acc, ing) => {
-    if (!acc[ing.section]) acc[ing.section] = [];
-    acc[ing.section].push(ing);
-    return acc;
-  }, {});
-
-  const weeklyNutrition = generatedPlan?.reduce((acc, day) => {
-    day.meals.forEach(meal => {
-      acc.calories += meal.cal;
-      acc.protein += meal.protein;
-      acc.carbs += meal.carbs;
-      acc.fat += meal.fat;
-    });
-    return acc;
-  }, { calories: 0, protein: 0, carbs: 0, fat: 0 }) || { calories: 0, protein: 0, carbs: 0, fat: 0 };
-
-  const dailyNutrition = {
-    calories: Math.round(weeklyNutrition.calories / 7),
-    protein: Math.round(weeklyNutrition.protein / 7),
-    carbs: Math.round(weeklyNutrition.carbs / 7),
-    fat: Math.round(weeklyNutrition.fat / 7)
-  };
-
-  const nutritionStatus = {
-    calories: Math.abs(dailyNutrition.calories - nutritionTargets.calories) / nutritionTargets.calories <= 0.1,
-    protein: dailyNutrition.protein >= nutritionTargets.protein * 0.9,
-    carbs: Math.abs(dailyNutrition.carbs - nutritionTargets.carbs) / nutritionTargets.carbs <= 0.15,
-    fat: Math.abs(dailyNutrition.fat - nutritionTargets.fat) / nutritionTargets.fat <= 0.15
-  };
-
-  const printMealPlan = () => {
-    window.print();
-  };
-
-  const exportShoppingList = () => {
-    const sections = Object.keys(ingredientsBySection).sort();
-    let text = 'SHOPPING LIST\n\n';
-    
-    sections.forEach(section => {
-      text += `${section.toUpperCase()}\n`;
-      ingredientsBySection[section].forEach(ing => {
-        text += `- ${ing.item}: ${ing.qty}\n`;
-      });
-      text += '\n';
-    });
-    
-    const blob = new Blob([text], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'shopping-list.txt';
-    a.click();
-  };
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 via-blue-50 to-purple-50 p-4">
-      <div className="max-w-7xl mx-auto">
-        <header className="bg-white rounded-2xl shadow-xl p-8 mb-8">
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            <div>
-              <h1 className="text-4xl font-bold text-gray-800 mb-2 flex items-center gap-3">
-                <Utensils className="text-green-600" size={40} />
-                Smart Meal Planner Pro
-              </h1>
-              <p className="text-gray-600 text-lg">AI-powered meal planning with all features</p>
-            </div>
-            <div className="text-right">
-              <div className="text-sm text-gray-500">Weekly Budget</div>
-              <div className="text-3xl font-bold text-green-600">${budget}</div>
-              <div className="text-xs text-gray-500">+${flexBudget} flex</div>
-            </div>
-          </div>
-        </header>
-
-        <div className="grid lg:grid-cols-4 gap-6 mb-8">
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <DollarSign className="text-green-600" size={24} />
-              <h2 className="text-xl font-semibold">Budget</h2>
-            </div>
-            <label className="block text-sm text-gray-600 mb-2">Weekly Budget ($)</label>
-            <input
-              type="number"
-              value={budget}
-              onChange={(e) => {
-                const val = parseFloat(e.target.value) || 0;
-                setBudget(val);
-                saveToStorage('settings', { budget: val, dietTypes, portionSize, nutritionTargets });
-              }}
-              className="w-full p-3 border-2 border-gray-200 rounded-lg focus:border-green-500 focus:outline-none text-lg mb-3"
-              min="0"
-              step="10"
-            />
-            <label className="block text-sm text-gray-600 mb-2">Flex Budget ($)</label>
-            <input
-              type="number"
-              value={flexBudget}
-              onChange={(e) => setFlexBudget(parseFloat(e.target.value) || 0)}
-              className="w-full p-3 border-2 border-gray-200 rounded-lg focus:border-green-500 focus:outline-none text-lg"
-              min="0"
-              step="5"
-            />
-            <p className="text-xs text-gray-500 mt-2">Flex allows going slightly over</p>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <Utensils className="text-orange-600" size={24} />
-              <h2 className="text-xl font-semibold">Portions</h2>
-            </div>
-            <label className="block text-sm text-gray-600 mb-2">Portion Size</label>
-            <select
-              value={portionSize}
-              onChange={(e) => {
-                const val = e.target.value;
-                setPortionSize(val);
-                saveToStorage('settings', { budget, dietTypes, portionSize: val, nutritionTargets });
-              }}
-              className="w-full p-3 border-2 border-gray-200 rounded-lg focus:border-orange-500 focus:outline-none"
-            >
-              <option value="single">Single (1 person)</option>
-              <option value="couple">Couple (2 people)</option>
-              <option value="family">Family (4 people)</option>
-            </select>
+    for day_index, day_plan in enumerate(plan):
+        day = day_plan['day']
+        meals = day_plan['meals']
+        day_total = day_plan['total']
+        
+        # Day header
+        with st.expander(f"**{day}** - {len(meals)} meals - ${day_total:.2f}", expanded=True):
+            if day_index % 2 == 1:
+                st.info("🎨 Variety day - Different meals from previous day")
             
-            <div className="mt-4">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={includeSnacks}
-                  onChange={(e) => setIncludeSnacks(e.target.checked)}
-                  className="w-4 h-4 text-orange-600 rounded"
-                />
-                <span className="text-sm font-medium text-gray-700">Include snacks</span>
-              </label>
-              <p className="text-xs text-gray-500 mt-1 ml-6">B/L/D always included</p>
-            </div>
-          </div>
+            col1, col2 = st.columns([4, 1])
+            with col2:
+                if st.button(f"🔄 Regenerate", key=f"regen_{day}"):
+                    # Regenerate just this day
+                    st.info("Feature: Regenerate individual days coming soon!")
+            
+            # Display meals
+            for meal_idx, meal in enumerate(meals):
+                st.markdown(f"#### {meal['type']}: {meal['name']}")
+                
+                # Meal details in columns
+                col1, col2, col3 = st.columns([2, 2, 1])
+                
+                with col1:
+                    st.markdown(f"**🏪 Store:** {meal['store']}")
+                    st.markdown(f"**⏱️ Prep Time:** {meal['prepTime']} min")
+                    st.markdown(f"**📊 Difficulty:** {meal['difficulty']}")
+                    if meal.get('tags'):
+                        tags = ", ".join(meal['tags'])
+                        st.markdown(f"**🏷️ Tags:** {tags}")
+                
+                with col2:
+                    st.markdown(f"**🔥 Calories:** {meal['cal']}")
+                    st.markdown(f"**💪 Protein:** {meal['protein']}g")
+                    st.markdown(f"**🌾 Carbs:** {meal['carbs']}g")
+                    st.markdown(f"**🥑 Fat:** {meal['fat']}g")
+                    if meal['portions'] > 1:
+                        st.markdown(f"**👥 Servings:** ×{meal['portions']}")
+                
+                with col3:
+                    st.markdown(f"**💵 Cost:** ${meal['actualCost']:.2f}")
+                    if meal['portions'] > 1:
+                        st.markdown(f"*(${meal['baseCost']:.2f} each)*")
+                    
+                    # Favorite button
+                    meal_key = f"{meal['name']}-{meal['diet']}"
+                    is_fav = any(f"{f['name']}-{f['diet']}" == meal_key for f in st.session_state.favorite_meals)
+                    
+                    if st.button("❤️" if is_fav else "🤍", key=f"fav_{day}_{meal_idx}"):
+                        if is_fav:
+                            st.session_state.favorite_meals = [f for f in st.session_state.favorite_meals 
+                                                              if f"{f['name']}-{f['diet']}" != meal_key]
+                        else:
+                            st.session_state.favorite_meals.append(meal)
+                        st.rerun()
+                    
+                    # Lock button
+                    locked_key = f"{day}-{meal['type']}"
+                    is_locked = locked_key in st.session_state.locked_meals
+                    
+                    if st.button("🔒" if is_locked else "🔓", key=f"lock_{day}_{meal_idx}"):
+                        if is_locked:
+                            del st.session_state.locked_meals[locked_key]
+                        else:
+                            st.session_state.locked_meals[locked_key] = meal
+                        st.rerun()
+                
+                # Ingredients
+                with st.expander("📝 Ingredients"):
+                    for ing in meal['ingredients']:
+                        st.markdown(f"- **{ing['item']}**: {ing['qty']} *({ing['section']})*")
+                
+                st.divider()
+    
+    st.divider()
+    
+    # Shopping List
+    st.markdown("### 🛒 Smart Shopping List")
+    st.markdown(f"Organized by store section • {len(shopping_list)} sections • "
+               f"{sum(len(items) for items in shopping_list.values())} items")
+    
+    tabs = st.tabs(sorted(shopping_list.keys()))
+    
+    for tab, section in zip(tabs, sorted(shopping_list.keys())):
+        with tab:
+            st.markdown(f"### {section}")
+            for item in shopping_list[section]:
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.checkbox(f"{item['item']}", key=f"shop_{section}_{item['item']}")
+                with col2:
+                    st.markdown(f"*{item['qty']}*")
+    
+    st.divider()
+    
+    # Nutritional Analysis
+    st.markdown("### 📈 Nutritional Analysis")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("#### Daily Averages vs Targets")
+        
+        # Calories
+        cal_percent = (daily_nutrition['calories'] / target_calories) * 100
+        cal_status = "✅" if abs(daily_nutrition['calories'] - target_calories) / target_calories <= 0.1 else "⚠️"
+        st.markdown(f"**Calories** {cal_status}")
+        st.progress(min(cal_percent / 100, 1.0))
+        st.markdown(f"{daily_nutrition['calories']} / {target_calories} cal")
+        
+        # Protein
+        prot_percent = (daily_nutrition['protein'] / target_protein) * 100
+        prot_status = "✅" if daily_nutrition['protein'] >= target_protein * 0.9 else "⚠️"
+        st.markdown(f"**Protein** {prot_status}")
+        st.progress(min(prot_percent / 100, 1.0))
+        st.markdown(f"{daily_nutrition['protein']}g / {target_protein}g")
+        
+        # Carbs
+        carb_percent = (daily_nutrition['carbs'] / target_carbs) * 100
+        carb_status = "✅" if abs(daily_nutrition['carbs'] - target_carbs) / target_carbs <= 0.15 else "⚠️"
+        st.markdown(f"**Carbs** {carb_status}")
+        st.progress(min(carb_percent / 100, 1.0))
+        st.markdown(f"{daily_nutrition['carbs']}g / {target_carbs}g")
+        
+        # Fat
+        fat_percent = (daily_nutrition['fat'] / target_fat) * 100
+        fat_status = "✅" if abs(daily_nutrition['fat'] - target_fat) / target_fat <= 0.15 else "⚠️"
+        st.markdown(f"**Fat** {fat_status}")
+        st.progress(min(fat_percent / 100, 1.0))
+        st.markdown(f"{daily_nutrition['fat']}g / {target_fat}g")
+    
+    with col2:
+        st.markdown("#### Weekly Totals")
+        st.metric("Total Calories", f"{weekly_nutrition['calories']:,}")
+        st.metric("Total Protein", f"{weekly_nutrition['protein']}g")
+        st.metric("Total Carbs", f"{weekly_nutrition['carbs']}g")
+        st.metric("Total Fat", f"{weekly_nutrition['fat']}g")
+        
+        all_on_target = all([
+            abs(daily_nutrition['calories'] - target_calories) / target_calories <= 0.1,
+            daily_nutrition['protein'] >= target_protein * 0.9,
+            abs(daily_nutrition['carbs'] - target_carbs) / target_carbs <= 0.15,
+            abs(daily_nutrition['fat'] - target_fat) / target_fat <= 0.15
+        ])
+        
+        if all_on_target:
+            st.success("✅ Well balanced! All targets met.")
+        else:
+            st.warning("⚠️ Some targets not met. Consider regenerating or adjusting targets.")
+    
+    # Favorites Section
+    if st.session_state.favorite_meals:
+        st.divider()
+        st.markdown("### ❤️ Your Favorite Meals")
+        
+        fav_cols = st.columns(3)
+        for idx, meal in enumerate(st.session_state.favorite_meals):
+            col = fav_cols[idx % 3]
+            with col:
+                with st.container():
+                    st.markdown(f"**{meal['name']}**")
+                    st.markdown(f"*{AVAILABLE_DIETS[meal['diet']]['name']}*")
+                    st.markdown(f"{meal['cal']} cal • {meal['prepTime']} min")
+                    if st.button("Remove", key=f"remove_fav_{idx}"):
+                        st.session_state.favorite_meals.pop(idx)
+                        st.rerun()
 
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <MapPin className="text-blue-600" size={24} />
-              <h2 className="text-xl font-semibold">Stores</h2>
-            </div>
-            <input
-              type="text"
-              value={zipCode}
-              onChange={(e) => setZipCode(e.target.value)}
-              className="w-full p-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:outline-none mb-3"
-              placeholder="ZIP Code"
-            />
-            <div className="space-y-2 max-h-40 overflow-y-auto">
-              {groceryStores.map(store => (
-                <div
-                  key={store.name}
-                  onClick={() => toggleStore(store.name)}
-                  className={`p-2 rounded-lg cursor-pointer transition text-sm ${
-                    selectedStores.includes(store.name)
-                      ? 'bg-blue-100 border-2 border-blue-500'
-                      : 'bg-gray-50 border-2 border-transparent hover:bg-gray-100'
-                  }`}
-                >
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <div className="font-semibold">{store.name}</div>
-                      <div className="text-xs text-gray-500">{store.distance}</div>
-                    </div>
-                    <span className={`text-xs px-2 py-1 rounded ${
-                      store.priceLevel === 'budget' ? 'bg-green-100 text-green-700' :
-                      store.priceLevel === 'premium' ? 'bg-purple-100 text-purple-700' :
-                      'bg-yellow-100 text-yellow-700'
-                    }`}>
-                      {store.priceLevel}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+else:
+    # Welcome screen
+    st.markdown("""
+    ## Welcome to Smart Meal Planner Pro! 👋
+    
+    Get started by:
+    1. **Setting your budget** in the sidebar
+    2. **Choosing your diet preferences** (Balanced, Keto, Vegan, etc.)
+    3. **Selecting local grocery stores**
+    4. **Clicking "Generate Meal Plan"**
+    
+    ### Features:
+    - 🎯 **Budget Optimization** - Stay within your budget with flex options
+    - 🥗 **10 Diet Types** - From Balanced to Gluten-Free
+    - 👥 **Portion Sizes** - Single, Couple, or Family
+    - 🔒 **Lock Favorite Meals** - Keep what you love
+    - ❤️ **Save Favorites** - Build your collection
+    - 🔄 **Smart Variety** - Different meals every other day
+    - 📊 **Nutrition Tracking** - Meet your daily targets
+    - 🛒 **Smart Shopping List** - Organized by store section
+    - 📥 **Export & Print** - Take it with you
+    
+    ### Pro Tips:
+    - Enable **Flex Budget** for better deals
+    - **Lock meals** you love before regenerating
+    - Check **Nutrition Settings** for custom targets
+    - Use **variety days** to avoid meal fatigue
+    """)
+    
+    st.info("💡 **Tip:** All your favorites and locked meals are saved automatically!")
 
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <TrendingUp className="text-purple-600" size={24} />
-              <h2 className="text-xl font-semibold">Diets</h2>
-            </div>
-            <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
-              {Object.entries(availableDiets).map(([key, diet]) => (
-                <div
-                  key={key}
-                  onClick={() => toggleDiet(key)}
-                  className={`p-2 rounded-lg cursor-pointer transition text-center ${
-                    dietTypes.includes(key)
-                      ? 'bg-purple-100 border-2 border-purple-500'
-                      : 'bg-gray-50 border-2 border-transparent hover:bg-gray-100'
-                  }`}
-                >
-                  <div className="text-xl mb-1">{diet.icon}</div>
-                  <div className="text-xs font-semibold">{diet.name}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {showNutritionSettings && (
-          <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold">Daily Nutrition Targets</h3>
-              <button
-                onClick={() => setShowNutritionSettings(false)}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="grid md:grid-cols-4 gap-4">
-              <div>
-                <label className="block text-sm text-gray-600 mb-2">Calories</label>
-                <input
-                  type="number"
-                  value={nutritionTargets.calories}
-                  onChange={(e) => setNutritionTargets({...nutritionTargets, calories: parseInt(e.target.value) || 0})}
-                  className="w-full p-2 border-2 border-gray-200 rounded-lg"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-600 mb-2">Protein (g)</label>
-                <input
-                  type="number"
-                  value={nutritionTargets.protein}
-                  onChange={(e) => setNutritionTargets({...nutritionTargets, protein: parseInt(e.target.value) || 0})}
-                  className="w-full p-2 border-2 border-gray-200 rounded-lg"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-600 mb-2">Carbs (g)</label>
-                <input
-                  type="number"
-                  value={nutritionTargets.carbs}
-                  onChange={(e) => setNutritionTargets({...nutritionTargets, carbs: parseInt(e.target.value) || 0})}
-                  className="w-full p-2 border-2 border-gray-200 rounded-lg"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-600 mb-2">Fat (g)</label>
-                <input
-                  type="number"
-                  value={nutritionTargets.fat}
-                  onChange={(e) => setNutritionTargets({...nutritionTargets, fat: parseInt(e.target.value) || 0})}
-                  className="w-full p-2 border-2 border-gray-200 rounded-lg"
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="text-center mb-8">
-          <button
-            onClick={generateMealPlan}
-            disabled={loading}
-            className="bg-gradient-to-r from-green-500 to-blue-500 text-white px-8 py-4 rounded-xl text-lg font-semibold hover:from-green-600 hover:to-blue-600 transition shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-3 mx-auto"
-          >
-            {loading ? (
-              <>
-                <RefreshCw className="animate-spin" size={24} />
-                Generating...
-              </>
-            ) : (
-              <>
-                <Sparkles size={24} />
-                Generate Meal Plan
-              </>
-            )}
-          </button>
-          <div className="flex items-center justify-center gap-4 mt-4">
-            <button
-              onClick={() => setShowNutritionSettings(!showNutritionSettings)}
-              className="text-sm text-blue-600 hover:underline flex items-center gap-1"
-            >
-              <TrendingUp size={16} />
-              Nutrition Targets
-            </button>
-            {favoriteMeals.length > 0 && (
-              <span className="text-sm text-gray-600">
-                <Heart size={16} className="inline text-red-500" /> {favoriteMeals.length} saved
-              </span>
-            )}
-          </div>
-        </div>
-
-        {generatedPlan && (
-          <>
-            <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-              <div className="grid md:grid-cols-5 gap-4">
-                <div className="text-center p-4 bg-gradient-to-br from-green-50 to-green-100 rounded-lg">
-                  <div className="text-2xl font-bold text-green-700">${totalCost.toFixed(2)}</div>
-                  <div className="text-xs text-gray-600 mt-1">Total Cost</div>
-                </div>
-                <div className="text-center p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg">
-                  <div className="text-2xl font-bold text-blue-700">${((budget + flexBudget) - totalCost).toFixed(2)}</div>
-                  <div className="text-xs text-gray-600 mt-1">Remaining</div>
-                </div>
-                <div className="text-center p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg">
-                  <div className="text-2xl font-bold text-purple-700">{generatedPlan.reduce((sum, day) => sum + day.meals.length, 0)}</div>
-                  <div className="text-xs text-gray-600 mt-1">Total Meals</div>
-                </div>
-                <div className="text-center p-4 bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg">
-                  <div className="text-2xl font-bold text-orange-700">{dailyNutrition.calories}</div>
-                  <div className="text-xs text-gray-600 mt-1">Daily Calories</div>
-                  {nutritionStatus.calories ? (
-                    <Check size={16} className="inline text-green-600 mt-1" />
-                  ) : (
-                    <AlertCircle size={16} className="inline text-orange-600 mt-1" />
-                  )}
-                </div>
-                <div className="text-center p-4 bg-gradient-to-br from-pink-50 to-pink-100 rounded-lg">
-                  <div className="text-2xl font-bold text-pink-700">{dailyNutrition.protein}g</div>
-                  <div className="text-xs text-gray-600 mt-1">Daily Protein</div>
-                  {nutritionStatus.protein ? (
-                    <Check size={16} className="inline text-green-600 mt-1" />
-                  ) : (
-                    <AlertCircle size={16} className="inline text-orange-600 mt-1" />
-                  )}
-                </div>
-              </div>
-              
-              <div className="flex gap-3 mt-4 justify-center">
-                <button
-                  onClick={printMealPlan}
-                  className="flex items-center gap-2 bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition"
-                >
-                  <Printer size={18} />
-                  Print
-                </button>
-                <button
-                  onClick={exportShoppingList}
-                  className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
-                >
-                  <Download size={18} />
-                  Export
-                </button>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-              <div className="flex items-center gap-2 mb-6">
-                <Calendar className="text-green-600" size={28} />
-                <h2 className="text-2xl font-semibold">Weekly Meal Plan</h2>
-              </div>
-
-              <div className="space-y-3">
-                {generatedPlan.map(({ day, meals, total }, dayIndex) => (
-                  <div key={day} className="border-2 border-gray-200 rounded-lg overflow-hidden">
-                    <div
-                      onClick={() => toggleDay(day)}
-                      className={`p-4 cursor-pointer transition flex justify-between items-center ${
-                        dayIndex % 2 === 1 ? 'bg-gradient-to-r from-blue-50 to-purple-50' : 'bg-gradient-to-r from-gray-50 to-gray-100'
-                      }`}
-                    >
-                      <div className="flex items-center gap-4 flex-wrap">
-                        <div className="font-bold text-lg text-gray-800">{day}</div>
-                        {dayIndex % 2 === 1 && (
-                          <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded font-semibold">
-                            Variety
-                          </span>
-                        )}
-                        <div className="text-sm text-gray-600">{meals.length} meals</div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            regenerateDay(day);
-                          }}
-                          className="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600 transition flex items-center gap-1"
-                        >
-                          <RotateCcw size={14} />
-                          Redo
-                        </button>
-                        <div className="font-semibold text-green-700">${total.toFixed(2)}</div>
-                        {expandedDays[day] ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-                      </div>
-                    </div>
-
-                    {expandedDays[day] && (
-                      <div className="p-4 space-y-3 bg-white">
-                        {meals.map((meal, idx) => (
-                          <div key={idx} className="border-l-4 border-green-500 bg-gray-50 p-4 rounded-r-lg">
-                            <div className="flex justify-between items-start">
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-2 flex-wrap">
-                                  <span className="font-semibold text-lg">{meal.name}</span>
-                                  <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded">
-                                    {meal.type}
-                                  </span>
-                                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">
-                                    {availableDiets[meal.diet].name}
-                                  </span>
-                                  {meal.tags?.map(tag => (
-                                    <span key={tag} className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded">
-                                      {tag}
-                                    </span>
-                                  ))}
-                                  <button onClick={() => toggleFavorite(meal)}>
-                                    <Heart
-                                      size={18}
-                                      className={isFavorite(meal) ? 'fill-red-500 text-red-500' : 'text-gray-400'}
-                                    />
-                                  </button>
-                                  <button onClick={() => toggleLockMeal(day, meal.type, meal)}>
-                                    {isLocked(day, meal.type) ? (
-                                      <Lock size={18} className="text-yellow-600" />
-                                    ) : (
-                                      <Unlock size={18} className="text-gray-400" />
-                                    )}
-                                  </button>
-                                </div>
-                                <div className="flex items-center gap-4 text-sm text-gray-600 mb-2 flex-wrap">
-                                  <span className="flex items-center gap-1">
-                                    <MapPin size={14} />
-                                    {meal.store}
-                                  </span>
-                                  <span className="flex items-center gap-1">
-                                    <Clock size={14} />
-                                    {meal.prepTime} min
-                                  </span>
-                                  <span>{meal.cal} cal</span>
-                                  <span>P: {meal.protein}g</span>
-                                  <span>C: {meal.carbs}g</span>
-                                  <span>F: {meal.fat}g</span>
-                                  {meal.portions > 1 && (
-                                    <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded">
-                                      x{meal.portions}
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="text-xs text-gray-700">
-                                  <strong>Ingredients:</strong>
-                                  <ul className="ml-4 mt-1 space-y-1">
-                                    {meal.ingredients.map((ing, i) => (
-                                      <li key={i}>{ing.item} - {ing.qty}</li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              </div>
-                              <div className="text-right ml-4">
-                                <div className="text-lg font-bold text-green-700">${meal.actualCost.toFixed(2)}</div>
-                                {meal.portions > 1 && (
-                                  <div className="text-xs text-gray-500">${meal.baseCost.toFixed(2)} each</div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-              <div className="flex items-center gap-2 mb-6">
-                <ShoppingCart className="text-green-600" size={28} />
-                <h2 className="text-2xl font-semibold">Shopping List</h2>
-              </div>
-              <p className="text-gray-600 mb-4">
-                By section • {Object.keys(ingredientsBySection).length} sections • {groupedIngredients.length} items
-              </p>
-              
-              <div className="space-y-4">
-                {Object.entries(ingredientsBySection).sort().map(([section, items]) => (
-                  <div key={section} className="border-l-4 border-blue-500 pl-4">
-                    <h3 className="font-bold text-gray-800 mb-2">{section}</h3>
-                    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-2">
-                      {items.map((item, idx) => (
-                        <div key={idx} className="bg-gray-50 p-2 rounded text-sm flex items-start gap-2">
-                          <div className="w-4 h-4 border-2 border-gray-400 rounded mt-0.5"></div>
-                          <div>
-                            <div className="font-medium">{item.item}</div>
-                            <div className="text-xs text-gray-500">{item.qty}</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {favoriteMeals.length > 0 && (
-              <div className="bg-white rounded-xl shadow-lg p-6">
-                <div className="flex items-center gap-2 mb-4">
-                  <Heart className="text-red-500" size={24} />
-                  <h2 className="text-xl font-semibold">Favorites</h2>
-                </div>
-                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {favoriteMeals.map((meal, idx) => (
-                    <div key={idx} className="bg-gray-50 p-3 rounded-lg border">
-                      <div className="flex justify-between">
-                        <div>
-                          <div className="font-semibold">{meal.name}</div>
-                          <div className="text-xs text-gray-600">{availableDiets[meal.diet].name}</div>
-                        </div>
-                        <button onClick={() => toggleFavorite(meal)} className="text-red-500">
-                          <Heart size={16} className="fill-red-500" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  );
-};
-
-export default MealPlannerApp;
+# Footer
+st.divider()
+st.markdown("""
+<div style='text-align: center; color: gray; padding: 20px;'>
+    Made with ❤️ using Streamlit | Smart Meal Planner Pro v1.0
+</div>
+""", unsafe_allow_html=True)
